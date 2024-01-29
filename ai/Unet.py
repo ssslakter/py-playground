@@ -75,31 +75,27 @@ class DownBlock(nn.Module):
         x = self.down(x)
         return x
     
-
-class SelfAttentionBlock(nn.Module):
-    def __init__(self, dim, heads = 8):
+class SelfAttention2d(nn.Module):
+    def __init__(self, c_in, n_head, norm, dropout_rate=0.):
         super().__init__()
-        self.heads = heads
-        self.scale = dim ** -0.5
+        assert c_in % n_head == 0
+        self.norm_in = norm(c_in)
+        self.n_head = n_head
+        self.qkv_proj = nn.Conv2d(c_in, c_in * 3, 1)
+        self.out_proj = nn.Conv2d(c_in, c_in, 1)
+        self.dropout = nn.Dropout(dropout_rate)
+        nn.init.zeros_(self.out_proj.weight)
+        nn.init.zeros_(self.out_proj.bias)
 
-        self.to_qkv = nn.Linear(dim, dim * 3, bias = False)
-        self.to_out = nn.Sequential(
-            nn.Linear(dim, dim),
-            nn.Dropout(0.1)
-        )
+    def forward(self, input, cond):
+        n, c, h, w = input.shape
+        qkv = self.qkv_proj(self.norm_in(input, cond))
+        qkv = qkv.view([n, self.n_head * 3, c // self.n_head, h * w]).transpose(2, 3)
+        q, k, v = qkv.chunk(3, dim=1)
+        y = F.scaled_dot_product_attention(q, k, v, dropout_p=self.dropout.p)
+        y = y.transpose(2, 3).contiguous().view([n, c, h, w])
+        return input + self.out_proj(y)
 
-        self.rearrange_qkv = Rearrange('b c (h w) -> (h w) b c', h = heads)
-        self.rearrange_out = Rearrange('(h w) b (p c) -> b (p c) (h w)', h = heads, p = -1)
-
-    def forward(self, x):
-        qkv = self.to_qkv(x)
-        q, k, v = self.rearrange_qkv(qkv).chunk(3, dim = -1)
-        dots = torch.einsum('b i d, b j d -> b i j', q, k) * self.scale
-        attn = dots.softmax(dim=-1)
-        out = torch.einsum('b i j, b j d -> b i d', attn, v)
-        out = self.rearrange_out(out)
-        return self.to_out(out)
-    
 
 class UpBlock(nn.Module):
     def __init__(self, n_emb, ni, prev_nf, nf, add_up=True, num_layers=2):
@@ -115,20 +111,19 @@ class UpBlock(nn.Module):
     
     
 class EmbUNetModel(nn.Module):
-    def __init__( self, in_channels=3, out_channels=3, nfs=(224,448,672,896), num_layers=1):
+    def __init__( self, in_channels=3, out_channels=3, nfs=(224,448,672,896), emb_dim = 1024, num_layers=1):
         super().__init__()
         self.conv_in = nn.Conv2d(in_channels, nfs[0], kernel_size=3, padding=1)
         self.n_temb = nf = nfs[0]
-        n_emb = nf*4
         # TODO: remove act func from 1st MLP layer
-        self.emb_mlp = nn.Sequential(lin(self.n_temb, n_emb, norm=nn.BatchNorm1d),
-                                     lin(n_emb, n_emb))
+        self.emb_mlp = nn.Sequential(lin(self.n_temb, emb_dim, norm=nn.BatchNorm1d),
+                                     lin(emb_dim, emb_dim))
         self.downs = nn.ModuleList()
         for i in range(len(nfs)):
             ni = nf
             nf = nfs[i]
-            self.downs.append(DownBlock(n_emb, ni, nf, add_down=i!=len(nfs)-1, num_layers=num_layers))
-        self.mid_block = EmbResBlock(n_emb, nfs[-1])
+            self.downs.append(DownBlock(emb_dim, ni, nf, add_down=i!=len(nfs)-1, num_layers=num_layers))
+        self.mid_block = EmbResBlock(emb_dim, nfs[-1])
 
         rev_nfs = list(reversed(nfs))
         nf = rev_nfs[0]
@@ -137,11 +132,11 @@ class EmbUNetModel(nn.Module):
             prev_nf = nf
             nf = rev_nfs[i]
             ni = rev_nfs[min(i+1, len(nfs)-1)]
-            self.ups.append(UpBlock(n_emb, ni, prev_nf, nf, add_up=i!=len(nfs)-1, num_layers=num_layers+1))
+            self.ups.append(UpBlock(emb_dim, ni, prev_nf, nf, add_up=i!=len(nfs)-1, num_layers=num_layers+1))
         self.conv_out = unet_conv(nfs[0], out_channels, act=nn.SiLU, norm=nn.BatchNorm2d, bias=False)
 
-    def forward(self, inp):
-        x,t = inp
+    @torch.autocast(device_type="cuda")
+    def forward(self, x,t):
         temb = timestep_embedding(t, self.n_temb)
         emb = self.emb_mlp(temb)
         x = self.conv_in(x)
