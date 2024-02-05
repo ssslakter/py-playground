@@ -61,6 +61,12 @@ class EmbResBlock(nn.Module):
         x = self.conv2(x)
         return x + self.idconv(inp)
 
+def pre_conv(ni, nf, ks=3, stride=1, act=nn.SiLU, norm=None, bias=True):
+    layers = nn.Sequential()
+    if norm: layers.append(norm(ni))
+    if act : layers.append(act())
+    layers.append(nn.Conv2d(ni, nf, stride=stride, kernel_size=ks, padding=ks//2, bias=bias))
+    return layers
     
 class DownBlock(nn.Module):
     def __init__(self, n_emb, ni, nf, add_down=True, num_layers=1):
