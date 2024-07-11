@@ -4,6 +4,5 @@ torchvision
 matplotlib
 fastai
 ipykernel
-ipympl
 datasets
 nbdev
