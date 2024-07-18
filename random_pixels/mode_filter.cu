@@ -2,10 +2,13 @@
 #include <stdio.h>
 #include <c10/cuda/CUDAException.h>
 
-
 #define CHECK_CUDA(x) TORCH_CHECK(x.device().is_cuda(), #x " must be a CUDA tensor")
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
-#define CHECK_INPUT(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
+#define CHECK_INPUT(x) \
+    CHECK_CUDA(x);     \
+    CHECK_CONTIGUOUS(x)
+
+const int BLOCK_SIZE = 16;
 
 __global__ void mode_filter2d_k(uint *input, uint *output, int w, int h, int r, int k)
 {
@@ -15,14 +18,15 @@ __global__ void mode_filter2d_k(uint *input, uint *output, int w, int h, int r, 
     {
         return;
     }
-    uint count[k];
-    for (int i = x-r; i <= x+r; i++)
+    extern __shared__ uint count[];
+
+    for (int i = x - r; i <= x + r; i++)
     {
-        for (int j = y-r; j <= y+r; j++)
+        for (int j = y - r; j <= y + r; j++)
         {
             if (i >= 0 && i < w && j >= 0 && j < h)
             {
-                count[input[i*k+j]]++;
+                count[threadIdx.x * k + input[i * k + j]]++;
             }
         }
     }
@@ -34,9 +38,8 @@ __global__ void mode_filter2d_k(uint *input, uint *output, int w, int h, int r, 
             max = count[i];
         }
     }
-    output[x*k+y] = max;
+    output[x * k + y] = max;
 }
-
 
 torch::Tensor mode_filter2d(torch::Tensor input, int r)
 {
@@ -45,7 +48,7 @@ torch::Tensor mode_filter2d(torch::Tensor input, int r)
     auto output = torch::empty_like(input);
     auto k = std::get<0>(torch::_unique(input)).size(0);
 
-    mode_filter2d_k<<<1, 1>>>(input.data_ptr<uint>(), output.data_ptr<uint>(), input.size(0), input.size(1), r, k);
+    mode_filter2d_k<<<BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE * k * sizeof(uint)>>>(input.data_ptr<uint>(), output.data_ptr<uint>(), input.size(0), input.size(1), r, k);
 
     return output;
 }
