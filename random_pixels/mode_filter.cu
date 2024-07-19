@@ -10,7 +10,7 @@
 
 const int BLOCK_SIZE = 16;
 
-__global__ void mode_filter2d_k(uint *input, uint *output, int w, int h, int r, int k)
+__global__ void mode_filter2d_k(int *input, int *output, int w, int h, int r, int k)
 {
     int x = blockDim.x * blockIdx.x + threadIdx.x;
     int y = blockDim.y * blockIdx.y + threadIdx.y;
@@ -18,27 +18,32 @@ __global__ void mode_filter2d_k(uint *input, uint *output, int w, int h, int r, 
     {
         return;
     }
-    extern __shared__ uint count[];
+    extern __shared__ int count[];
 
     for (int i = x - r; i <= x + r; i++)
     {
         for (int j = y - r; j <= y + r; j++)
         {
+            __syncthreads();
             if (i >= 0 && i < w && j >= 0 && j < h)
             {
-                count[threadIdx.x * k + input[i * k + j]]++;
+                count[threadIdx.y*blockDim.x + threadIdx.x + input[i * h + j]]++;
             }
+            __syncthreads();
         }
     }
-    uint max = 0;
+    int max = 0;
+    int idx_max = 0;
     for (int i = 0; i < k; i++)
     {
-        if (count[i] > max)
+        auto m = count[threadIdx.y*blockDim.x + threadIdx.x + i];
+        if (m > max)
         {
-            max = count[i];
+            idx_max = i;
+            max = m;
         }
     }
-    output[x * k + y] = max;
+    output[x * h + y] = idx_max;
 }
 
 torch::Tensor mode_filter2d(torch::Tensor input, int r)
@@ -47,13 +52,16 @@ torch::Tensor mode_filter2d(torch::Tensor input, int r)
 
     auto output = torch::empty_like(input);
     auto k = std::get<0>(torch::_unique(input)).size(0);
+    TORCH_CHECK(input.max().item<int>() == k - 1 && input.min().item<int>() == 0,
+                "input must be a tensor of integers from 0 to k-1");
 
-    mode_filter2d_k<<<BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE * k * sizeof(uint)>>>(input.data_ptr<uint>(), output.data_ptr<uint>(), input.size(0), input.size(1), r, k);
+    mode_filter2d_k<<<BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE*BLOCK_SIZE * k * sizeof(int)>>>(
+        input.data_ptr<int>(), output.data_ptr<int>(), input.size(0), input.size(1), r, k);
 
     return output;
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
-    m.def("mode_filter", &mode_filter2d, "Mode sliding filter");
+    m.def("mode_filter2d", &mode_filter2d, "Mode sliding filter");
 }
