@@ -1,8 +1,10 @@
 # Byte-compiled / optimized / DLL files
+.history
 __pycache__/
 *.py[cod]
 *$py.class
-
+wandb
+/ai/models
 # C extensions
 *.so
 
