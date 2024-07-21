@@ -18,32 +18,36 @@ __global__ void mode_filter2d_k(int *input, int *output, int w, int h, int r, in
     {
         return;
     }
+    int thread_id = threadIdx.y * blockDim.x + threadIdx.x;
     extern __shared__ int count[];
-
+    for (int i = thread_id; i < BLOCK_SIZE * BLOCK_SIZE * k; i += BLOCK_SIZE * BLOCK_SIZE)
+    {
+        count[i] = 0;
+    }
+    __syncthreads();
     for (int i = x - r; i <= x + r; i++)
     {
         for (int j = y - r; j <= y + r; j++)
         {
-            __syncthreads();
             if (i >= 0 && i < w && j >= 0 && j < h)
             {
-                count[threadIdx.y*blockDim.x + threadIdx.x + input[i * h + j]]++;
+                count[thread_id*k + input[i * h + j]]++;
             }
-            __syncthreads();
         }
     }
+    __syncthreads();
     int max = 0;
     int idx_max = 0;
     for (int i = 0; i < k; i++)
     {
-        auto m = count[threadIdx.y*blockDim.x + threadIdx.x + i];
+        auto m = count[thread_id + i];
         if (m > max)
         {
             idx_max = i;
             max = m;
         }
     }
-    output[x * h + y] = idx_max;
+    output[y*w + x] = idx_max;
 }
 
 torch::Tensor mode_filter2d(torch::Tensor input, int r)
@@ -55,7 +59,7 @@ torch::Tensor mode_filter2d(torch::Tensor input, int r)
     TORCH_CHECK(input.max().item<int>() == k - 1 && input.min().item<int>() == 0,
                 "input must be a tensor of integers from 0 to k-1");
 
-    mode_filter2d_k<<<BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE*BLOCK_SIZE * k * sizeof(int)>>>(
+    mode_filter2d_k<<<BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE * BLOCK_SIZE * k * sizeof(int)>>>(
         input.data_ptr<int>(), output.data_ptr<int>(), input.size(0), input.size(1), r, k);
 
     return output;
