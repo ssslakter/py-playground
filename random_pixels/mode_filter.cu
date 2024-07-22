@@ -31,7 +31,7 @@ __global__ void mode_filter2d_k(int *input, int *output, int w, int h, int r, in
         {
             if (i >= 0 && i < w && j >= 0 && j < h)
             {
-                count[thread_id*k + input[i * h + j]]++;
+                &count[thread_id*k + input[i * h + j]]++;
             }
         }
     }
@@ -40,7 +40,7 @@ __global__ void mode_filter2d_k(int *input, int *output, int w, int h, int r, in
     int idx_max = 0;
     for (int i = 0; i < k; i++)
     {
-        auto m = count[thread_id + i];
+        auto m = count[thread_id*k + i];
         if (m > max)
         {
             idx_max = i;
@@ -58,8 +58,10 @@ torch::Tensor mode_filter2d(torch::Tensor input, int r)
     auto k = std::get<0>(torch::_unique(input)).size(0);
     TORCH_CHECK(input.max().item<int>() == k - 1 && input.min().item<int>() == 0,
                 "input must be a tensor of integers from 0 to k-1");
+    dim3 block(BLOCK_SIZE, BLOCK_SIZE);
+    dim3 grid((input.size(0) + BLOCK_SIZE - 1) / BLOCK_SIZE, (input.size(1) + BLOCK_SIZE - 1) / BLOCK_SIZE);
 
-    mode_filter2d_k<<<BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE * BLOCK_SIZE * k * sizeof(int)>>>(
+    mode_filter2d_k<<<grid, block, BLOCK_SIZE * BLOCK_SIZE * k * sizeof(int)>>>(
         input.data_ptr<int>(), output.data_ptr<int>(), input.size(0), input.size(1), r, k);
 
     return output;
