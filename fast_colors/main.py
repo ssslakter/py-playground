@@ -12,16 +12,11 @@ headers = [picolink,
            *plotly_headers,
            Link(rel="stylesheet", href="/static/styles.css")]
 
-styles = [
-    Style(".htmx-indicator {opacity:0;}"),
-    Style(".htmx-indicator .htmx-request {opacity:1;}"),
-]
-
-app, rt = fast_app(hdrs=headers + styles)
+app, rt = fast_app(hdrs=headers)
 
 
 def Loader(id="loader"):
-    return H2("Loading...", id=id, cls="htmx-indicator", style="text-align:center;")
+    return H2("Loading...", id=id, cls="htmx-indicator", aria_busy="true")
 
 
 @rt('/')
@@ -33,21 +28,20 @@ def get():
                Form(Input(name="file", type="file", accept="image/*"),
                     Button("Upload"),
                     hx_post="/colorize",
-                    hx_target="#main",
+                    hx_target="#script",
                     hx_indicator="#loader",
-                    
                     ),
                P("You should see a scatter plot of the colors below."),
                Loader(),
-               Div(id="main"))
+               Div(id="canvas"),
+               Div(id="script"))
 
 
 def image(id):
-    return Div(Img(src=f"/images/{id}.png", width=200, height=200),
-                   style="display: flex;",
+    return Div(Img(src=f"/images/{id}.png"),
                    id=f'img-{id}',
                    hx_get=f"/colorize/{id}",
-                   hx_target="#main",
+                   hx_target="#script",
                    hx_indicator="#loader")
 
 
@@ -56,7 +50,7 @@ def colorize(img):
     img = extract_colors(img)
     fig = scatter_plotly(img)
     fig.update_layout(width=800, height=800)
-    return Div(plotly2fasthtml(fig))
+    return plotly2fasthtml(fig)
 
 @rt('/colorize/{id}')
 def get(id: str):

@@ -1,8 +1,38 @@
+* {
+    font-size:large;
+}
 
 .htmx-indicator {
     opacity: 0;
+    transition: opacity 0.5s ease-in-out;
 }
 
 .htmx-indicator .htmx-request{
     opacity: 1;
+    text-align: center;
+}
+
+
+#canvas {
+    display: flex;
+}
+
+h1 {
+    /*dotted underline*/
+    padding-bottom: 10px;
+    border-bottom: 10px dotted rgb(248, 106, 154);
+}
+
+img {
+    width: auto;
+    height: 300px;
+}
+
+img:hover {
+    cursor: pointer;
+    border: 5px solid;
+}
+
+.grid {
+    padding: 0 10px;
 }
