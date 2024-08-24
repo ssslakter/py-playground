@@ -1,5 +1,7 @@
 from io import BytesIO
-from colors import compress_img, extract_colors, scatter_plotly
+
+import torch, numpy as np
+from colors import compress_img, extract_colors, scatter_plotly, segment_k_means
 from fasthtml.common import *
 from fh_plotly import plotly2fasthtml, plotly_headers
 from PIL import Image
@@ -34,7 +36,19 @@ def get():
                P("You should see a scatter plot of the colors below."),
                Loader(),
                Div(id="canvas"),
-               Div(id="script"))
+               Div(id="script"),
+               Div(
+                   H2("K-means segmentation"),
+                   P("You can also segment the image using k-means. Upload an image above and click the button below."),
+                   Form(Input(name="file", type="file", accept="image/*"),
+                    Button("Segment"),
+                    hx_post="/k-means",
+                    hx_target="#segmented",
+                    hx_indicator="#loader2",
+                    ),
+                   Loader("loader2"),
+                   Div(id="segmented"),
+                   ))
 
 
 def image(id):
@@ -63,5 +77,15 @@ async def post(file: UploadFile):
     img = Image.open(BytesIO(img)).convert("RGB")
     return colorize(img)
 
+
+@rt('/k-means')
+async def post(file: UploadFile):
+    img = await file.read()
+    img = Image.open(BytesIO(img)).convert("RGB")
+    img = torch.tensor(np.array(img)/255).to('cuda')
+    img = segment_k_means(img)
+    fname = f"generated/{file.filename}"
+    img.save(fname)
+    return Img(src=fname)
 
 serve()
