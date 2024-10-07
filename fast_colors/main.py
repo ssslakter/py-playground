@@ -15,6 +15,7 @@ headers = [picolink,
 app, rt = fast_app(hdrs=headers)
 
 
+
 def Loader(id="loader"):
     return H2("Loading...", id=id, cls="htmx-indicator", aria_busy="true")
 
@@ -94,6 +95,7 @@ async def post(file: UploadFile):
 @rt('/k-means')
 async def post(file: UploadFile, k: int = 2):
     if k < 1: k = 1
+    Path('generated').mkdir(exist_ok=True)
     name, ext = file.filename.split('.')
     fname = f"generated/{name}+{k}.{ext}"
     if not os.path.exists(fname):
